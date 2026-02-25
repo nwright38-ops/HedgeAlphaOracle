@@ -93,21 +93,9 @@ function checkPayment(req, res, next) {
 
   if (!paymentSig) {
     return res.status(402).json({
-      error: 'Payment Required',
-      message: 'This endpoint requires payment via x402 protocol',
-      price: '$' + price,
-      payTo: WALLET_ADDRESS,
-      network: 'base-mainnet',
-      asset: 'USDC',
-      facilitator: 'https://x402.org/facilitator',
-      instructions: 'Send USDC on Base network and include transaction signature in x-payment-signature header'
-    });
-  }
-  next();
-}
-
-app.get('/', (req, res) => {
-  res.json({
+     app.get('/', (req, res) => {
+  res.redirect('https://nwright38-ops.github.io/HedgeAlphaOracle');
+});
     api: 'HedgeAlphaOracle',
     version: '3.2',
     description: 'Real-time crypto & stock signals for AI agents and traders',
