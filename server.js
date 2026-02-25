@@ -4,7 +4,7 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-const WALLET_ADDRESS = process.env.WALLET_ADDRESS;
+const WALLET_ADDRESS = process.env.WALLET_ADDRESS || '0x3278657Fd9013D48692C146Bb7FC730e67EAa192';
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || 'https://hedgealphaoracle-production.up.railway.app';
 
