@@ -463,17 +463,42 @@ app.get('/signal/:asset', async (req, res) => {
 async function startServer() {
   if (CDP_API_KEY_ID && CDP_API_KEY_SECRET) {
     try {
-      const { generateJwt } = await import('@coinbase/cdp-sdk/auth');
+      const { SignJWT, importPKCS8 } = await import('jose');
+
+      async function makeCdpJwt() {
+        const now = Math.floor(Date.now() / 1000);
+        const nonce = [...Array(16)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+
+        // CDP API key secret is an EC private key in PEM format
+        let privateKey;
+        try {
+          // Try as PEM key (ES256)
+          const pemKey = CDP_API_KEY_SECRET.includes('-----') ? CDP_API_KEY_SECRET : CDP_API_KEY_SECRET;
+          privateKey = await importPKCS8(pemKey, 'ES256');
+        } catch (e) {
+          // If not PEM, use as HMAC secret
+          const encoder = new TextEncoder();
+          privateKey = encoder.encode(CDP_API_KEY_SECRET);
+        }
+
+        const jwt = await new SignJWT({
+          sub: CDP_API_KEY_ID,
+          iss: 'cdp',
+          aud: ['cdp_service'],
+          nbf: now,
+          exp: now + 120,
+          uris: ['https://api.cdp.coinbase.com/platform/v2/x402']
+        })
+          .setProtectedHeader({ alg: 'ES256', kid: CDP_API_KEY_ID, nonce, typ: 'JWT' })
+          .sign(privateKey);
+
+        return jwt;
+      }
+
       const facilitatorClient = new HTTPFacilitatorClient({
         url: 'https://api.cdp.coinbase.com/platform/v2/x402',
         createAuthHeaders: async () => {
-          const jwt = await generateJwt({
-            apiKeyId: CDP_API_KEY_ID,
-            apiKeySecret: CDP_API_KEY_SECRET,
-            requestMethod: 'GET',
-            requestHost: 'api.cdp.coinbase.com',
-            requestPath: '/platform/v2/x402'
-          });
+          const jwt = await makeCdpJwt();
           const headers = { Authorization: 'Bearer ' + jwt };
           return { verify: headers, settle: headers, supported: headers };
         }
