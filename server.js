@@ -15,28 +15,7 @@ const CDP_API_KEY_SECRET = process.env.CDP_API_KEY_SECRET;
 
 // x402 PAYMENT SETUP — CDP Facilitator with JWT auth
 let resourceServer;
-if (CDP_API_KEY_ID && CDP_API_KEY_SECRET) {
-  const { generateJwt } = require('@coinbase/cdp-sdk/auth');
-  const facilitatorClient = new HTTPFacilitatorClient({
-    url: 'https://api.cdp.coinbase.com/platform/v2/x402',
-    createAuthHeaders: async () => {
-      const jwt = await generateJwt({
-        apiKeyId: CDP_API_KEY_ID,
-        apiKeySecret: CDP_API_KEY_SECRET,
-        requestMethod: 'GET',
-        requestHost: 'api.cdp.coinbase.com',
-        requestPath: '/platform/v2/x402'
-      });
-      const headers = { Authorization: 'Bearer ' + jwt };
-      return { verify: headers, settle: headers, supported: headers };
-    }
-  });
-  resourceServer = new x402ResourceServer(facilitatorClient)
-    .register('eip155:8453', new ExactEvmScheme());
-  console.log('x402: CDP facilitator configured with API key auth');
-} else {
-  console.log('x402: WARNING — No CDP_API_KEY_ID/CDP_API_KEY_SECRET found. Using legacy middleware (no on-chain verification).');
-}
+// x402 init happens in startServer() below
 
 const CRYPTO_ASSETS = [
   'BTC','ETH','SOL','BNB','XRP','ADA','AVAX','DOGE','DOT','MATIC',
@@ -116,7 +95,8 @@ function generateSignal(change24h) {
 // Base Mainnet (eip155:8453) — verified payments
 // ─────────────────────────────────────────────
 
-if (resourceServer) {
+function applyPaymentMiddleware() {
+  if (!resourceServer) return;
   app.use(
     paymentMiddleware(
       {
@@ -479,11 +459,43 @@ app.get('/signal/:asset', async (req, res) => {
   }
 );
 
-app.listen(PORT, function() {
-  console.log('HedgeAlphaOracle v4.2 running on port ' + PORT);
-  console.log('Networks: Base (eip155:8453) + Monad (eip155:10143) + Hedera (eip155:295) + Algorand');
-  console.log('6 endpoints: sentiment $0.01 | alpha $0.02 | premium $0.05');
-  console.log('fear-greed $0.01 | whale-alert $0.02 | portfolio-risk $0.02');
-  console.log('x402 payments on Base + Monad + Hedera + Algorand | Bazaar discoverable');
-});
+// Start server after x402 init
+async function startServer() {
+  if (CDP_API_KEY_ID && CDP_API_KEY_SECRET) {
+    try {
+      const cdpAuth = await import('@coinbase/cdp-sdk/auth');
+      const facilitatorClient = new HTTPFacilitatorClient({
+        url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+        createAuthHeaders: async () => {
+          const jwt = await cdpAuth.generateJwt({
+            apiKeyId: CDP_API_KEY_ID,
+            apiKeySecret: CDP_API_KEY_SECRET,
+            requestMethod: 'GET',
+            requestHost: 'api.cdp.coinbase.com',
+            requestPath: '/platform/v2/x402'
+          });
+          const headers = { Authorization: 'Bearer ' + jwt };
+          return { verify: headers, settle: headers, supported: headers };
+        }
+      });
+      resourceServer = new x402ResourceServer(facilitatorClient)
+        .register('eip155:8453', new ExactEvmScheme());
+      applyPaymentMiddleware();
+      console.log('x402: CDP facilitator active — on-chain verification ENABLED');
+    } catch (e) {
+      console.error('x402: CDP init failed:', e.message, '— starting WITHOUT payment verification');
+    }
+  } else {
+    console.log('x402: No CDP keys — starting WITHOUT payment verification');
+  }
+
+  app.listen(PORT, function() {
+    console.log('HedgeAlphaOracle v4.3 running on port ' + PORT);
+    console.log('Networks: Base (eip155:8453) + Hedera (eip155:295) + Algorand');
+    console.log('6 endpoints: sentiment $0.01 | alpha $0.02 | premium $0.05');
+    console.log('fear-greed $0.01 | whale-alert $0.02 | portfolio-risk $0.02');
+  });
+}
+
+startServer();
 
