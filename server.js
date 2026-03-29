@@ -11,9 +11,9 @@ const WALLET_ADDRESS = process.env.WALLET_ADDRESS;
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || 'https://hedgealphaoracle-production.up.railway.app';
 
-// x402 PAYMENT SETUP — CDP Facilitator (Bazaar-compatible, on-chain verification)
+// x402 PAYMENT SETUP — x402.org Facilitator (on-chain verification, no API key needed)
 const facilitatorClient = new HTTPFacilitatorClient({
-  url: 'https://api.cdp.coinbase.com/platform/v2/x402'
+  url: 'https://x402.org/facilitator'
 });
 const resourceServer = new x402ResourceServer(facilitatorClient)
   .register('eip155:8453', new ExactEvmScheme());
