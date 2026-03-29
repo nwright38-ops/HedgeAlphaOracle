@@ -1,8 +1,8 @@
-require('dotenv').config();
-const express = require('express');
-const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
-const { HTTPFacilitatorClient } = require('@x402/core/server');
-const { ExactEvmScheme } = require('@x402/evm/exact/server');
+import 'dotenv/config';
+import express from 'express';
+import { paymentMiddleware, x402ResourceServer } from '@x402/express';
+import { HTTPFacilitatorClient } from '@x402/core/server';
+import { ExactEvmScheme } from '@x402/evm/exact/server';
 
 const app = express();
 app.use(express.json());
@@ -463,11 +463,11 @@ app.get('/signal/:asset', async (req, res) => {
 async function startServer() {
   if (CDP_API_KEY_ID && CDP_API_KEY_SECRET) {
     try {
-      const cdpAuth = await import('@coinbase/cdp-sdk/auth');
+      const { generateJwt } = await import('@coinbase/cdp-sdk/auth');
       const facilitatorClient = new HTTPFacilitatorClient({
         url: 'https://api.cdp.coinbase.com/platform/v2/x402',
         createAuthHeaders: async () => {
-          const jwt = await cdpAuth.generateJwt({
+          const jwt = await generateJwt({
             apiKeyId: CDP_API_KEY_ID,
             apiKeySecret: CDP_API_KEY_SECRET,
             requestMethod: 'GET',

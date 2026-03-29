@@ -9,7 +9,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@coinbase/cdp-sdk": "^1.0.0",
     "@x402/core": "^2.4.0",
