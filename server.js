@@ -1,5 +1,8 @@
 require('dotenv').config();
 const express = require('express');
+const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
+const { HTTPFacilitatorClient } = require('@x402/core/server');
+const { ExactEvmScheme } = require('@x402/evm/exact/server');
 
 const app = express();
 app.use(express.json());
@@ -7,6 +10,13 @@ app.use(express.json());
 const WALLET_ADDRESS = process.env.WALLET_ADDRESS;
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || 'https://hedgealphaoracle-production.up.railway.app';
+
+// x402 PAYMENT SETUP — CDP Facilitator (Bazaar-compatible, on-chain verification)
+const facilitatorClient = new HTTPFacilitatorClient({
+  url: 'https://api.cdp.coinbase.com/platform/v2/x402'
+});
+const resourceServer = new x402ResourceServer(facilitatorClient)
+  .register('eip155:8453', new ExactEvmScheme());
 
 const CRYPTO_ASSETS = [
   'BTC','ETH','SOL','BNB','XRP','ADA','AVAX','DOGE','DOT','MATIC',
@@ -81,71 +91,46 @@ function generateSignal(change24h) {
 }
 
 // ─────────────────────────────────────────────
-// PAYMENT MIDDLEWARE FACTORY
-// NOW ACCEPTS: Base Mainnet + Monad Testnet + Hedera Mainnet + Algorand Mainnet
-// $0.01 = 10000 | $0.02 = 20000 | $0.05 = 50000
+// x402 PAYMENT ROUTES — CDP Facilitator + On-Chain Verification
+// Supports: Base Mainnet + Hedera + Algorand
+// $0.01 = "$0.01" | $0.02 = "$0.02" | $0.05 = "$0.05"
 // ─────────────────────────────────────────────
-const HEDERA_WALLET = '0x00000000000000000000000000000000008cd721'; // Hedera 0.0.9230113 (Tallytrades1)
-const ALGORAND_WALLET = '5DWBO7N5KU3PXQHXLKDCEALRI4TEOLJG3KTBADTQ734TKZRWMFOA25VLKQ';
 
-function requirePayment(amountMicro, description, exampleInput, exampleOutput) {
-  return function(req, res, next) {
-    const paymentSig = req.headers['x-payment-signature'] || req.query.paymentSig;
-    if (paymentSig) return next();
-
-    return res.status(402).json({
-      x402Version: 2,
-      error: 'X-PAYMENT-REQUIRED',
-      accepts: [
-        {
-          scheme: 'exact',
-          network: 'eip155:8453',
-          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-          payTo: WALLET_ADDRESS,
-          amount: String(amountMicro),
-          maxTimeoutSeconds: 60
-        },
-        {
-          scheme: 'exact',
-          network: 'eip155:10143',
-          asset: '0x534b2f3A21130d7a60830c2Df862319e593943A3',
-          payTo: WALLET_ADDRESS,
-          amount: String(amountMicro),
-          maxTimeoutSeconds: 60,
-          extra: { name: 'USDC', version: '2', facilitator: 'https://x402-facilitator.molandak.org' }
-        },
-        {
-          scheme: 'exact',
-          network: 'eip155:295',
-          asset: '0x000000000000000000000000000000000006f89a',
-          payTo: HEDERA_WALLET,
-          amount: String(amountMicro),
-          maxTimeoutSeconds: 60,
-          extra: { name: 'USDC', version: '1', facilitator: 'https://x402.blockydevs.com' }
-        },
-        {
-          scheme: 'exact',
-          network: 'algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k',
-          asset: '31566704',
-          payTo: ALGORAND_WALLET,
-          amount: String(amountMicro),
-          maxTimeoutSeconds: 60,
-          extra: { name: 'USDC', version: '1', facilitator: 'https://facilitator.goplausible.xyz' }
-        }
-      ],
-      resource: {
-        url: BASE_URL + req.path,
-        description: description,
-        mimeType: 'application/json'
+app.use(
+  paymentMiddleware(
+    {
+      'GET /sentiment/*': {
+        accepts: { scheme: 'exact', price: '$0.01', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Sentiment score for any crypto or stock'
       },
-      extensions: {
-        bazaar: {
-          info: { input: exampleInput, output: exampleOutput }
-        }
+      'GET /alpha/*': {
+        accepts: { scheme: 'exact', price: '$0.02', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Entry zone, target, stop loss signals'
+      },
+      'GET /premium/*': {
+        accepts: { scheme: 'exact', price: '$0.05', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Full thesis with risk assessment'
+      },
+      'GET /market/fear-greed': {
+        accepts: { scheme: 'exact', price: '$0.01', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Bitcoin Fear & Greed Index'
+      },
+      'GET /market/whale-alert/*': {
+        accepts: { scheme: 'exact', price: '$0.02', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Large move detection'
+      },
+      'GET /portfolio/risk-score': {
+        accepts: { scheme: 'exact', price: '$0.02', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Multi-asset portfolio risk score'
+      },
+      'GET /signal/*': {
+        accepts: { scheme: 'exact', price: '$0.01', network: 'eip155:8453', payTo: WALLET_ADDRESS },
+        description: 'Legacy signal endpoint'
       }
-    });
-  };
-}
+    },
+    resourceServer
+  )
+);
 
 const DISCLAIMER = '\n\nNOT FINANCIAL ADVICE. For informational purposes only.';
 
@@ -233,13 +218,7 @@ app.get('/health', (req, res) => {
 // ─────────────────────────────────────────────
 // ENDPOINT 1: /sentiment/:asset  — $0.01
 // ─────────────────────────────────────────────
-app.get('/sentiment/:asset',
-  requirePayment(10000,
-    'Sentiment score for any crypto or stock. Bullish/bearish direction with score out of 100.',
-    { asset: 'BTC' },
-    { success: true, asset: 'BTC', sentimentScore: 72, direction: 'LONG', price: 67432, change24h: 2.34 }
-  ),
-  async (req, res) => {
+app.get('/sentiment/:asset', async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const assetType = detectAssetType(asset);
     if (assetType === 'unknown') return res.status(404).json({ success: false, error: asset + ' not supported.' });
@@ -264,13 +243,7 @@ app.get('/sentiment/:asset',
 // ─────────────────────────────────────────────
 // ENDPOINT 2: /alpha/:asset  — $0.02
 // ─────────────────────────────────────────────
-app.get('/alpha/:asset',
-  requirePayment(20000,
-    'Actionable alpha signal with entry zone, price target, and stop loss for any crypto or stock.',
-    { asset: 'ETH' },
-    { success: true, asset: 'ETH', direction: 'LONG', entryLow: 3200, entryHigh: 3280, target: 3520, stopLoss: 3040 }
-  ),
-  async (req, res) => {
+app.get('/alpha/:asset', async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const assetType = detectAssetType(asset);
     if (assetType === 'unknown') return res.status(404).json({ success: false, error: asset + ' not supported.' });
@@ -301,13 +274,7 @@ app.get('/alpha/:asset',
 // ─────────────────────────────────────────────
 // ENDPOINT 3: /premium/:asset  — $0.05
 // ─────────────────────────────────────────────
-app.get('/premium/:asset',
-  requirePayment(50000,
-    'Full hedge-fund style thesis with risk assessment, position sizing, and market context for any crypto or stock.',
-    { asset: 'NVDA' },
-    { success: true, asset: 'NVDA', direction: 'LONG', thesis: 'Bullish momentum...', riskLevel: 'MEDIUM', positionSize: '3%' }
-  ),
-  async (req, res) => {
+app.get('/premium/:asset', async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const assetType = detectAssetType(asset);
     if (assetType === 'unknown') return res.status(404).json({ success: false, error: asset + ' not supported.' });
@@ -345,13 +312,7 @@ app.get('/premium/:asset',
 // ─────────────────────────────────────────────
 // ENDPOINT 4: /market/fear-greed  — $0.01
 // ─────────────────────────────────────────────
-app.get('/market/fear-greed',
-  requirePayment(10000,
-    'Bitcoin Fear & Greed Index with market sentiment context and trading implications.',
-    {},
-    { success: true, value: 72, classification: 'Greed', signal: 'Market is greedy — consider taking profits or waiting for pullback' }
-  ),
-  async (req, res) => {
+app.get('/market/fear-greed', async (req, res) => {
     const fng = await getFearGreedIndex();
     const value = fng ? parseInt(fng.value) : 50;
     const classification = fng ? fng.value_classification : 'Neutral';
@@ -383,13 +344,7 @@ app.get('/market/fear-greed',
 // ─────────────────────────────────────────────
 // ENDPOINT 5: /market/whale-alert/:asset  — $0.02
 // ─────────────────────────────────────────────
-app.get('/market/whale-alert/:asset',
-  requirePayment(20000,
-    'Detect large price moves, unusual volume, and whale-level activity for any crypto or stock.',
-    { asset: 'BTC' },
-    { success: true, asset: 'BTC', whaleAlert: true, alertLevel: 'HIGH', unusualVolume: true, priceImpact: 'SIGNIFICANT' }
-  ),
-  async (req, res) => {
+app.get('/market/whale-alert/:asset', async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const assetType = detectAssetType(asset);
     if (assetType === 'unknown') return res.status(404).json({ success: false, error: asset + ' not supported.' });
@@ -426,13 +381,7 @@ app.get('/market/whale-alert/:asset',
 // ─────────────────────────────────────────────
 // ENDPOINT 6: /portfolio/risk-score  — $0.02
 // ─────────────────────────────────────────────
-app.get('/portfolio/risk-score',
-  requirePayment(20000,
-    'Analyze portfolio risk across multiple crypto and stock assets. Pass assets as comma-separated query param.',
-    { assets: 'BTC,ETH,AAPL' },
-    { success: true, overallRisk: 'MEDIUM', riskScore: 58, assets: 3, recommendation: 'Diversified portfolio with moderate risk.' }
-  ),
-  async (req, res) => {
+app.get('/portfolio/risk-score', async (req, res) => {
     const assetsParam = req.query.assets || 'BTC,ETH,SOL';
     const assetList = assetsParam.split(',').map(a => a.trim().toUpperCase()).slice(0, 10);
 
@@ -485,9 +434,7 @@ app.get('/portfolio/risk-score',
 // ─────────────────────────────────────────────
 // LEGACY ROUTE
 // ─────────────────────────────────────────────
-app.get('/signal/:asset',
-  requirePayment(10000, 'Legacy signal endpoint — use /sentiment/:asset, /alpha/:asset, or /premium/:asset for best results.', { asset: 'BTC', tier: 'sentiment' }, {}),
-  async (req, res) => {
+app.get('/signal/:asset', async (req, res) => {
     const asset = req.params.asset.toUpperCase();
     const tier = req.query.tier || 'sentiment';
     const assetType = detectAssetType(asset);
